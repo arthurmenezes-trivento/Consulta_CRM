@@ -116,6 +116,8 @@ def buscar_por_numero(numero_inscricao):
     <attribute name="fullname" />
     <attribute name="cad_cpf" />
     <attribute name="crmeduc_unidade" />
+    <attribute name="crmeduc_unidadeform" />
+    <attribute name="trivento_unidadetrivento" />
     <filter type="and">
       <condition attribute="leadid" operator="eq" value="{lead_id_xml}" />
     </filter>
@@ -133,6 +135,8 @@ def buscar_por_numero(numero_inscricao):
         "Nome": texto(lead.get("fullname")),
         "CPF": texto(lead.get("cad_cpf")),
         "Unidade": texto(lead.get("crmeduc_unidade")),
+        "Unidade formulario": texto(lead.get("crmeduc_unidadeform")),
+        "Unidade Trivento": texto(lead.get("trivento_unidadetrivento")),
         "Curso": texto(inscricao.get("cad_ofertaid")),
         "Forma de ingresso": texto(inscricao.get("cad_concursoid")),
     }
