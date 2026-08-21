@@ -115,9 +115,10 @@ def buscar_por_numero(numero_inscricao):
   <entity name="lead">
     <attribute name="fullname" />
     <attribute name="cad_cpf" />
+    <attribute name="mobilephone"/>
+    <attribute name="telephone1"/>
+
     <attribute name="crmeduc_unidade" />
-    <attribute name="crmeduc_unidadeform" />
-    <attribute name="trivento_unidadetrivento" />
     <filter type="and">
       <condition attribute="leadid" operator="eq" value="{lead_id_xml}" />
     </filter>
@@ -130,15 +131,23 @@ def buscar_por_numero(numero_inscricao):
         raise ValueError("O lead relacionado a inscricao nao foi encontrado.")
 
     lead = leads[0]
+    forma_ingresso = texto(inscricao.get("cad_concursoid")).replace("Faculdade Serra Dourada",'').strip()
+    # retirar unidades
+    unidades = ['Altamira', 'Canaã', 'Itabirito', 'Lorena']
+    for unidade in unidades:
+        if unidade in forma_ingresso:
+            forma_ingresso = forma_ingresso.replace(unidade, '').strip()
+            forma_ingresso = forma_ingresso.replace('-', ' ')
     return {
-        "Numero da inscricao": texto(inscricao.get("cad_numeroinscricao")),
-        "Nome": texto(lead.get("fullname")),
+        "Número de Inscrição": texto(inscricao.get("cad_numeroinscricao")),
+        "NOME": texto(lead.get("fullname")),
+        "CELULAR": texto(lead.get("mobilephone")) if lead.get("mobilephone") else texto(lead.get("telephone1")),
         "CPF": texto(lead.get("cad_cpf")),
-        "Unidade": texto(lead.get("crmeduc_unidade")),
-        "Unidade formulario": texto(lead.get("crmeduc_unidadeform")),
-        "Unidade Trivento": texto(lead.get("trivento_unidadetrivento")),
-        "Curso": texto(inscricao.get("cad_ofertaid")),
-        "Forma de ingresso": texto(inscricao.get("cad_concursoid")),
+        "CURSO": texto(inscricao.get("cad_ofertaid")),
+        "FORMA DE INGRESSO": forma_ingresso,
+        
+        # "Unidade": texto(lead.get("crmeduc_unidade")),
+        
     }
 
 
