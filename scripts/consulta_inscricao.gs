@@ -191,7 +191,7 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
     }
 
     aba.getRange(linha, COLUNA_DATA)
-      .setValue(new Date())
+      .setValue(dataAtualSemHora_())
       .setNumberFormat("dd/MM/yyyy");
     celulaInscricao.setValue(numero).clearNote();
     aba.getRange(linha, COLUNA_NOME).setValue(dados.nome || "");
@@ -207,6 +207,12 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
     limparResultadoLinha_(aba, linha);
     celulaInscricao.setNote(`Erro na consulta: ${erro.message || String(erro)}`);
   }
+}
+
+
+function dataAtualSemHora_() {
+  const agora = new Date();
+  return new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
 }
 
 
