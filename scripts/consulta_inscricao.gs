@@ -21,8 +21,35 @@ const CRM_AUTH_TYPE = "APICRMEducacional";
 const PADRAO_INSCRICAO = /^CAN-\d{6}-TRI$/;
 const MENSAGEM_PROPRIETARIO_VAZIO =
   "O Lead referente a essa inscrição está sem proprietário. Favor preencher o campo proprietário Lead no CRM e tentar novamente";
+const MENSAGEM_CONSULTOR_DIVERGENTE =
+  "O Consultor selecionado não corresponde ao proprietário no CRM";
+
+const CONSULTOR_PROPRIETARIO = {
+  "Gabriel Matos": "Gabriel",
+  "Maria Eduarda Freire": "Duda",
+  "Maria Rafaela da Rocha Tavares": "Maria Rafaela",
+  "Adauri Marques Delfino Junior": "Adauri",
+  "Karen Flávia": "Flávia",
+  "Daniel Faria Santos": "Daniel",
+  "Geovana Souza da Silva": "Geovana",
+  "Agnata Pamela Silva Souza": "Agnata",
+  "Giovanna Eduarda Do Carmo Braga": "Giovanna Braga",
+  "Hailton Alves Júnior": "Hailton",
+  "Karolaine de Oliveira Alves Souza": "Karolaine",
+  "Thiago Oliveira da Cruz": "Thiago",
+  "Maria Fernanda Luiz Monteiro": "Maria Fernanda",
+  "Ana Carolina Guimarães": "Ana Carolina",
+  "Lorena Viana Gonçalves Pereira": "Lorena",
+  "Thalia Gabriela de Araújo Silva": "Thalia",
+  "Thalia Costa": "Thalia Costa",
+  "Camila Guimarães Santos": "Camila",
+  "Breno Assis Ferreira": "Breno",
+  "Alana Mileyde de Souza Pinto": "Alana",
+  "Debora Soares": "Débora",
+};
 
 const LINHA_CABECALHO = 1;
+const COLUNA_CONSULTOR = 1;
 const COLUNA_DATA = 2;
 const COLUNA_INSCRICAO = 3;
 const COLUNA_NOME = 4;
@@ -77,10 +104,10 @@ function aoEditarNumeroInscricao(evento) {
   const colunaInicial = intervalo.getColumn();
   const colunaFinal = intervalo.getLastColumn();
 
+  const colunasAjustadas = [COLUNA_CONSULTOR, COLUNA_INSCRICAO];
   if (
     primeiraLinha > ultimaLinha ||
-    COLUNA_INSCRICAO < colunaInicial ||
-    COLUNA_INSCRICAO > colunaFinal
+    !colunasAjustadas.some((coluna) => coluna >= colunaInicial && coluna <= colunaFinal)
   ) {
     return;
   }
@@ -192,6 +219,22 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
       return;
     }
 
+    const consultorLinha = aba
+      .getRange(linha, COLUNA_CONSULTOR)
+      .getDisplayValue()
+      .trim();
+
+    if (!consultorLinha) {
+      throw new Error(MENSAGEM_CONSULTOR_DIVERGENTE);
+    }
+
+    const proprietarioEsperado = CONSULTOR_PROPRIETARIO[dados.proprietario] ||
+      dados.proprietario;
+
+    if (normalizarTexto_(consultorLinha) !== normalizarTexto_(proprietarioEsperado)) {
+      throw new Error(MENSAGEM_CONSULTOR_DIVERGENTE);
+    }
+
     aba.getRange(linha, COLUNA_DATA)
       .setValue(dataAtualSemHora_())
       .setNumberFormat("dd/MM/yyyy");
@@ -211,6 +254,10 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
 
     if ((erro.message || String(erro)) === MENSAGEM_PROPRIETARIO_VAZIO) {
       aba.getParent().toast(MENSAGEM_PROPRIETARIO_VAZIO, "CRM", 5);
+    }
+
+    if ((erro.message || String(erro)) === MENSAGEM_CONSULTOR_DIVERGENTE) {
+      aba.getParent().toast(MENSAGEM_CONSULTOR_DIVERGENTE, "CRM", 5);
     }
   }
 }
@@ -363,9 +410,7 @@ function buscarPorNumero_(numeroInscricao, token) {
   const lead = leads[0];
   const proprietario = textoCampo_(lead, "cad_proprietariopro");
   if (!proprietario) {
-    throw new Error(
-      "O Lead referente a essa inscrição está sem proprietário. Favor preencher o campo proprietário Lead no CRM e tentar novamente"
-    );
+    throw new Error(MENSAGEM_PROPRIETARIO_VAZIO);
   }
 
   return {
@@ -377,7 +422,18 @@ function buscarPorNumero_(numeroInscricao, token) {
     formaIngresso: limparFormaIngresso_(
       textoCampo_(inscricao, "cad_concursoid")
     ),
+    proprietario,
   };
+}
+
+
+function normalizarTexto_(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 
