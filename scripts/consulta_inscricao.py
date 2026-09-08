@@ -117,7 +117,7 @@ def buscar_por_numero(numero_inscricao):
     <attribute name="cad_cpf" />
     <attribute name="mobilephone"/>
     <attribute name="telephone1"/>
-
+    <attribute name="cad_proprietariopro" />
     <attribute name="crmeduc_unidade" />
     <filter type="and">
       <condition attribute="leadid" operator="eq" value="{lead_id_xml}" />
@@ -145,6 +145,7 @@ def buscar_por_numero(numero_inscricao):
         "CPF": texto(lead.get("cad_cpf")),
         "CURSO": texto(inscricao.get("cad_ofertaid")),
         "FORMA DE INGRESSO": forma_ingresso,
+        "Proprietário": texto(lead.get("cad_proprietariopro")),
         
         # "Unidade": texto(lead.get("crmeduc_unidade")),
         

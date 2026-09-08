@@ -19,6 +19,8 @@ const CRM_BASE_URL = "https://trivento.api.crmeducacional.com";
 const CRM_SEARCH_URL = `${CRM_BASE_URL}/api/LocalizacaoAvancada`;
 const CRM_AUTH_TYPE = "APICRMEducacional";
 const PADRAO_INSCRICAO = /^CAN-\d{6}-TRI$/;
+const MENSAGEM_PROPRIETARIO_VAZIO =
+  "O Lead referente a essa inscrição está sem proprietário. Favor preencher o campo proprietário Lead no CRM e tentar novamente";
 
 const LINHA_CABECALHO = 1;
 const COLUNA_DATA = 2;
@@ -206,6 +208,10 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
   } catch (erro) {
     limparResultadoLinha_(aba, linha);
     celulaInscricao.setNote(`Erro na consulta: ${erro.message || String(erro)}`);
+
+    if ((erro.message || String(erro)) === MENSAGEM_PROPRIETARIO_VAZIO) {
+      aba.getParent().toast(MENSAGEM_PROPRIETARIO_VAZIO, "CRM", 5);
+    }
   }
 }
 
@@ -342,6 +348,7 @@ function buscarPorNumero_(numeroInscricao, token) {
     <attribute name="cad_cpf" />
     <attribute name="mobilephone" />
     <attribute name="telephone1" />
+    <attribute name="cad_proprietariopro" />
     <filter type="and">
       <condition attribute="leadid" operator="eq" value="${leadIdXml}" />
     </filter>
@@ -354,6 +361,13 @@ function buscarPorNumero_(numeroInscricao, token) {
   }
 
   const lead = leads[0];
+  const proprietario = textoCampo_(lead, "cad_proprietariopro");
+  if (!proprietario) {
+    throw new Error(
+      "O Lead referente a essa inscrição está sem proprietário. Favor preencher o campo proprietário Lead no CRM e tentar novamente"
+    );
+  }
+
   return {
     nome: textoCampo_(lead, "fullname"),
     celular:
