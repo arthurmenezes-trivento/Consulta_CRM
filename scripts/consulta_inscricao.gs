@@ -235,6 +235,8 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
       throw new Error(MENSAGEM_CONSULTOR_DIVERGENTE);
     }
 
+    limparDestaqueLinha_(aba, linha);
+
     aba.getRange(linha, COLUNA_DATA)
       .setValue(dataAtualSemHora_())
       .setNumberFormat("dd/MM/yyyy");
@@ -249,14 +251,19 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
     aba.getRange(linha, COLUNA_CURSO).setValue(dados.curso || "");
     aba.getRange(linha, COLUNA_FORMA_INGRESSO).setValue(dados.formaIngresso || "");
   } catch (erro) {
-    limparResultadoLinha_(aba, linha);
-    celulaInscricao.setNote(`Erro na consulta: ${erro.message || String(erro)}`);
+    const mensagemErro = erro.message || String(erro);
 
-    if ((erro.message || String(erro)) === MENSAGEM_PROPRIETARIO_VAZIO) {
+    // Bloqueia qualquer preenchimento da linha quando a validação de
+    // consultor/proprietário não é atendida. Não limpa os campos antigos,
+    // apenas registra a falha na nota da inscrição e pinta a linha inteira.
+    celulaInscricao.setNote(`Erro na consulta: ${mensagemErro}`);
+    destacarLinhaErro_(aba, linha);
+
+    if (mensagemErro === MENSAGEM_PROPRIETARIO_VAZIO) {
       aba.getParent().toast(MENSAGEM_PROPRIETARIO_VAZIO, "CRM", 5);
     }
 
-    if ((erro.message || String(erro)) === MENSAGEM_CONSULTOR_DIVERGENTE) {
+    if (mensagemErro === MENSAGEM_CONSULTOR_DIVERGENTE) {
       aba.getParent().toast(MENSAGEM_CONSULTOR_DIVERGENTE, "CRM", 5);
     }
   }
@@ -273,6 +280,18 @@ function limparResultadoLinha_(aba, linha) {
   aba.getRange(linha, COLUNA_DATA).clearContent();
   aba.getRange(linha, COLUNA_NOME, 1, COLUNA_FORMA_INGRESSO - COLUNA_NOME + 1)
     .clearContent();
+}
+
+
+function destacarLinhaErro_(aba, linha) {
+  aba.getRange(linha, 1, 1, aba.getLastColumn())
+    .setBackground("#FDECEC");
+}
+
+
+function limparDestaqueLinha_(aba, linha) {
+  aba.getRange(linha, 1, 1, aba.getLastColumn())
+    .setBackground(null);
 }
 
 
