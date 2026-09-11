@@ -23,6 +23,7 @@ const MENSAGEM_PROPRIETARIO_VAZIO =
   "O Lead referente a essa inscrição está sem proprietário. Favor preencher o campo proprietário Lead no CRM e tentar novamente";
 const MENSAGEM_CONSULTOR_DIVERGENTE =
   "O Consultor selecionado não corresponde ao proprietário no CRM";
+const PREFIXO_PROTECAO_DIVERGENCIA = "CRM_DIVERGENCIA_AUTOMATICA";
 
 const CONSULTOR_PROPRIETARIO = {
   "Gabriel Matos": "Gabriel",
@@ -99,10 +100,35 @@ function aoEditarNumeroInscricao(evento) {
   }
 
   const intervalo = evento.range;
+  const aba = intervalo.getSheet();
   const primeiraLinha = Math.max(intervalo.getRow(), LINHA_CABECALHO + 1);
   const ultimaLinha = intervalo.getLastRow();
   const colunaInicial = intervalo.getColumn();
   const colunaFinal = intervalo.getLastColumn();
+
+  const editouCamposResultado =
+    (COLUNA_DATA >= colunaInicial && COLUNA_DATA <= colunaFinal) ||
+    (colunaInicial <= COLUNA_FORMA_INGRESSO && colunaFinal >= COLUNA_NOME);
+
+  if (primeiraLinha <= ultimaLinha && editouCamposResultado) {
+    let encontrouLinhaBloqueada = false;
+
+    for (let linha = primeiraLinha; linha <= ultimaLinha; linha += 1) {
+      if (linhaEstaBloqueadaPorDivergencia_(aba, linha)) {
+        limparResultadoLinha_(aba, linha);
+        aplicarValidacaoBloqueio_(aba, linha);
+        encontrouLinhaBloqueada = true;
+      }
+    }
+
+    if (encontrouLinhaBloqueada) {
+      aba.getParent().toast(
+        "Linha bloqueada: corrija a divergência e consulte novamente a inscrição.",
+        "CRM",
+        5
+      );
+    }
+  }
 
   const colunasAjustadas = [COLUNA_CONSULTOR, COLUNA_INSCRICAO];
   if (
@@ -112,7 +138,6 @@ function aoEditarNumeroInscricao(evento) {
     return;
   }
 
-  const aba = intervalo.getSheet();
   const entradas = aba
     .getRange(primeiraLinha, COLUNA_INSCRICAO, ultimaLinha - primeiraLinha + 1, 1)
     .getDisplayValues();
@@ -235,6 +260,7 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
       throw new Error(MENSAGEM_CONSULTOR_DIVERGENTE);
     }
 
+    desbloquearCamposResultado_(aba, linha);
     limparDestaqueLinha_(aba, linha);
 
     aba.getRange(linha, COLUNA_DATA)
@@ -252,10 +278,16 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
     aba.getRange(linha, COLUNA_FORMA_INGRESSO).setValue(dados.formaIngresso || "");
   } catch (erro) {
     const mensagemErro = erro.message || String(erro);
+    const deveBloquearPreenchimento =
+      mensagemErro === MENSAGEM_PROPRIETARIO_VAZIO ||
+      mensagemErro === MENSAGEM_CONSULTOR_DIVERGENTE;
 
-    // Bloqueia qualquer preenchimento da linha quando a validação de
-    // consultor/proprietário não é atendida. Não limpa os campos antigos,
-    // apenas registra a falha na nota da inscrição e pinta a linha inteira.
+    if (deveBloquearPreenchimento) {
+      limparResultadoLinha_(aba, linha);
+      bloquearCamposResultado_(aba, linha);
+    }
+
+    // Registra a falha na inscrição e sinaliza visualmente a linha.
     celulaInscricao.setNote(`Erro na consulta: ${mensagemErro}`);
     destacarLinhaErro_(aba, linha);
 
@@ -280,6 +312,96 @@ function limparResultadoLinha_(aba, linha) {
   aba.getRange(linha, COLUNA_DATA).clearContent();
   aba.getRange(linha, COLUNA_NOME, 1, COLUNA_FORMA_INGRESSO - COLUNA_NOME + 1)
     .clearContent();
+}
+
+
+/** Impede a edição manual dos campos que são preenchidos pela consulta. */
+function bloquearCamposResultado_(aba, linha) {
+  desbloquearCamposResultado_(aba, linha);
+
+  const usuarioExecutor = Session.getEffectiveUser();
+  const intervalos = obterIntervalosCamposResultado_(aba, linha);
+  aplicarValidacaoBloqueio_(aba, linha);
+
+  intervalos.forEach((intervalo, indice) => {
+    const protecao = intervalo
+      .protect()
+      .setDescription(
+        `${PREFIXO_PROTECAO_DIVERGENCIA}:${aba.getSheetId()}:${linha}:${indice}`
+      );
+
+    // Mantém o usuário que executa o gatilho autorizado para que o próprio
+    // script consiga atualizar e liberar os campos após uma consulta válida.
+    protecao.addEditor(usuarioExecutor);
+    protecao.removeEditors(protecao.getEditors());
+
+    if (protecao.canDomainEdit()) {
+      protecao.setDomainEdit(false);
+    }
+  });
+}
+
+
+/** Remove somente os bloqueios criados por este script na linha informada. */
+function desbloquearCamposResultado_(aba, linha) {
+  const protecoes = obterProtecoesDivergenciaLinha_(aba, linha);
+
+  if (protecoes.length === 0) {
+    return;
+  }
+
+  protecoes.forEach((protecao) => protecao.remove());
+  obterIntervalosCamposResultado_(aba, linha)
+    .forEach((intervalo) => intervalo.clearDataValidations());
+}
+
+
+/** Informa se a linha ainda possui um bloqueio criado por divergência. */
+function linhaEstaBloqueadaPorDivergencia_(aba, linha) {
+  return obterProtecoesDivergenciaLinha_(aba, linha).length > 0;
+}
+
+
+/** Localiza somente as proteções de divergência da linha informada. */
+function obterProtecoesDivergenciaLinha_(aba, linha) {
+  return aba.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+    .filter((protecao) => {
+      const descricao = protecao.getDescription() || "";
+      const intervaloProtegido = protecao.getRange();
+
+      return descricao.indexOf(PREFIXO_PROTECAO_DIVERGENCIA) === 0 &&
+        intervaloProtegido.getRow() === linha &&
+        intervaloProtegido.getLastRow() === linha;
+    });
+}
+
+
+/** Retorna os campos automáticos da linha, mantendo A e C liberadas. */
+function obterIntervalosCamposResultado_(aba, linha) {
+  return [
+    aba.getRange(linha, COLUNA_DATA),
+    aba.getRange(
+      linha,
+      COLUNA_NOME,
+      1,
+      COLUNA_FORMA_INGRESSO - COLUNA_NOME + 1
+    ),
+  ];
+}
+
+
+/** Rejeita entradas manuais, inclusive da conta proprietária da planilha. */
+function aplicarValidacaoBloqueio_(aba, linha) {
+  const regraBloqueio = SpreadsheetApp.newDataValidation()
+    .requireFormulaSatisfied("=FALSE")
+    .setAllowInvalid(false)
+    .setHelpText(
+      "Corrija a divergência entre consultor e proprietário e consulte novamente."
+    )
+    .build();
+
+  obterIntervalosCamposResultado_(aba, linha)
+    .forEach((intervalo) => intervalo.setDataValidation(regraBloqueio));
 }
 
 
