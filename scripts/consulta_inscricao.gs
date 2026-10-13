@@ -24,6 +24,8 @@ const MENSAGEM_PROPRIETARIO_VAZIO =
 const MENSAGEM_CONSULTOR_DIVERGENTE =
   "O Consultor selecionado não corresponde ao proprietário no CRM";
 const PREFIXO_PROTECAO_DIVERGENCIA = "CRM_DIVERGENCIA_AUTOMATICA";
+const TEXTO_VALIDACAO_BLOQUEIO =
+  "Corrija a divergência entre consultor e proprietário e consulte novamente.";
 
 const CONSULTOR_PROPRIETARIO = {
   "Gabriel Matos": "Gabriel",
@@ -65,6 +67,7 @@ function onOpen() {
     .createMenu("CRM")
     .addItem("Consultar linha selecionada", "consultarLinhaSelecionada")
     .addItem("Consultar todas as inscricoes", "consultarInscricoes")
+    .addItem("Remover bloqueios antigos do CRM", "removerBloqueiosCrm")
     .addSeparator()
     .addItem("Ativar preenchimento automatico", "instalarGatilhoEdicao")
     .addToUi();
@@ -106,30 +109,6 @@ function aoEditarNumeroInscricao(evento) {
   const colunaInicial = intervalo.getColumn();
   const colunaFinal = intervalo.getLastColumn();
 
-  const editouCamposResultado =
-    (COLUNA_DATA >= colunaInicial && COLUNA_DATA <= colunaFinal) ||
-    (colunaInicial <= COLUNA_FORMA_INGRESSO && colunaFinal >= COLUNA_NOME);
-
-  if (primeiraLinha <= ultimaLinha && editouCamposResultado) {
-    let encontrouLinhaBloqueada = false;
-
-    for (let linha = primeiraLinha; linha <= ultimaLinha; linha += 1) {
-      if (linhaEstaBloqueadaPorDivergencia_(aba, linha)) {
-        limparResultadoLinha_(aba, linha);
-        aplicarValidacaoBloqueio_(aba, linha);
-        encontrouLinhaBloqueada = true;
-      }
-    }
-
-    if (encontrouLinhaBloqueada) {
-      aba.getParent().toast(
-        "Linha bloqueada: corrija a divergência e consulte novamente a inscrição.",
-        "CRM",
-        5
-      );
-    }
-  }
-
   const colunasAjustadas = [COLUNA_CONSULTOR, COLUNA_INSCRICAO];
   if (
     primeiraLinha > ultimaLinha ||
@@ -144,6 +123,7 @@ function aoEditarNumeroInscricao(evento) {
 
   entradas.forEach(([numero], indice) => {
     if (!String(numero).trim()) {
+      desbloquearCamposResultado_(aba, primeiraLinha + indice);
       limparResultadoLinha_(aba, primeiraLinha + indice);
       aba.getRange(primeiraLinha + indice, COLUNA_INSCRICAO).clearNote();
     }
@@ -159,6 +139,7 @@ function aoEditarNumeroInscricao(evento) {
   } catch (erro) {
     entradas.forEach(([numero], indice) => {
       if (String(numero).trim()) {
+        desbloquearCamposResultado_(aba, primeiraLinha + indice);
         limparResultadoLinha_(aba, primeiraLinha + indice);
         aba.getRange(primeiraLinha + indice, COLUNA_INSCRICAO)
           .setNote(`Erro na consulta: ${erro.message || String(erro)}`);
@@ -191,7 +172,16 @@ function consultarLinhaSelecionada() {
     return;
   }
 
-  consultarEPreencherLinha_(aba, linha, numero, obterTokenDasPropriedades_());
+  let token;
+  try {
+    token = obterTokenDasPropriedades_();
+  } catch (erro) {
+    desbloquearCamposResultado_(aba, linha);
+    aba.getRange(linha, COLUNA_INSCRICAO)
+      .setNote(`Erro na consulta: ${erro.message || String(erro)}`);
+    return;
+  }
+  consultarEPreencherLinha_(aba, linha, numero, token);
 }
 
 
@@ -214,7 +204,20 @@ function consultarInscricoes() {
     return;
   }
 
-  const token = obterTokenDasPropriedades_();
+  let token;
+  try {
+    token = obterTokenDasPropriedades_();
+  } catch (erro) {
+    entradas.forEach(([numero], indice) => {
+      if (String(numero).trim()) {
+        const linha = LINHA_CABECALHO + 1 + indice;
+        desbloquearCamposResultado_(aba, linha);
+        aba.getRange(linha, COLUNA_INSCRICAO)
+          .setNote(`Erro na consulta: ${erro.message || String(erro)}`);
+      }
+    });
+    return;
+  }
   entradas.forEach(([numero], indice) => {
     if (String(numero).trim()) {
       consultarEPreencherLinha_(
@@ -235,6 +238,7 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
   const celulaInscricao = aba.getRange(linha, COLUNA_INSCRICAO);
 
   try {
+    desbloquearCamposResultado_(aba, linha);
     const numero = normalizarNumeroInscricao_(entrada);
     const dados = buscarPorNumero_(numero, token);
 
@@ -260,7 +264,6 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
       throw new Error(MENSAGEM_CONSULTOR_DIVERGENTE);
     }
 
-    desbloquearCamposResultado_(aba, linha);
     limparDestaqueLinha_(aba, linha);
 
     aba.getRange(linha, COLUNA_DATA)
@@ -278,13 +281,9 @@ function consultarEPreencherLinha_(aba, linha, entrada, token) {
     aba.getRange(linha, COLUNA_FORMA_INGRESSO).setValue(dados.formaIngresso || "");
   } catch (erro) {
     const mensagemErro = erro.message || String(erro);
-    const deveBloquearPreenchimento =
-      mensagemErro === MENSAGEM_PROPRIETARIO_VAZIO ||
-      mensagemErro === MENSAGEM_CONSULTOR_DIVERGENTE;
-
-    if (deveBloquearPreenchimento) {
+    if (mensagemErro === MENSAGEM_PROPRIETARIO_VAZIO ||
+        mensagemErro === MENSAGEM_CONSULTOR_DIVERGENTE) {
       limparResultadoLinha_(aba, linha);
-      bloquearCamposResultado_(aba, linha);
     }
 
     // Registra a falha na inscrição e sinaliza visualmente a linha.
@@ -315,50 +314,51 @@ function limparResultadoLinha_(aba, linha) {
 }
 
 
-/** Impede a edição manual dos campos que são preenchidos pela consulta. */
-function bloquearCamposResultado_(aba, linha) {
-  desbloquearCamposResultado_(aba, linha);
-
-  const usuarioExecutor = Session.getEffectiveUser();
-  const intervalos = obterIntervalosCamposResultado_(aba, linha);
-  aplicarValidacaoBloqueio_(aba, linha);
-
-  intervalos.forEach((intervalo, indice) => {
-    const protecao = intervalo
-      .protect()
-      .setDescription(
-        `${PREFIXO_PROTECAO_DIVERGENCIA}:${aba.getSheetId()}:${linha}:${indice}`
-      );
-
-    // Mantém o usuário que executa o gatilho autorizado para que o próprio
-    // script consiga atualizar e liberar os campos após uma consulta válida.
-    protecao.addEditor(usuarioExecutor);
-    protecao.removeEditors(protecao.getEditors());
-
-    if (protecao.canDomainEdit()) {
-      protecao.setDomainEdit(false);
-    }
-  });
-}
-
-
-/** Remove somente os bloqueios criados por este script na linha informada. */
+/** Remove somente os bloqueios antigos criados por este script na linha. */
 function desbloquearCamposResultado_(aba, linha) {
   const protecoes = obterProtecoesDivergenciaLinha_(aba, linha);
-
-  if (protecoes.length === 0) {
-    return;
-  }
-
   protecoes.forEach((protecao) => protecao.remove());
-  obterIntervalosCamposResultado_(aba, linha)
-    .forEach((intervalo) => intervalo.clearDataValidations());
+  limparValidacoesBloqueioLinha_(aba, linha);
 }
 
 
-/** Informa se a linha ainda possui um bloqueio criado por divergência. */
-function linhaEstaBloqueadaPorDivergencia_(aba, linha) {
-  return obterProtecoesDivergenciaLinha_(aba, linha).length > 0;
+/** Remove também validações deixadas por uma execução interrompida. */
+function limparValidacoesBloqueioLinha_(aba, linha) {
+  [aba.getRange(linha, COLUNA_DATA),
+    aba.getRange(linha, COLUNA_NOME, 1, COLUNA_FORMA_INGRESSO - COLUNA_NOME + 1)]
+    .forEach((intervalo) => {
+      intervalo.getDataValidations()[0].forEach((validacao, indice) => {
+        if (validacao &&
+            validacao.getCriteriaValues()[0] === "=FALSE" &&
+            validacao.getHelpText() === TEXTO_VALIDACAO_BLOQUEIO) {
+          intervalo.getCell(1, indice + 1).clearDataValidations();
+        }
+      });
+    });
+}
+
+
+/** Limpa proteções legadas em todas as abas da planilha. */
+function removerBloqueiosCrm() {
+  const planilha = SpreadsheetApp.getActiveSpreadsheet();
+  planilha.getSheets().forEach((aba) => {
+    const linhas = new Set(
+      aba.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+        .filter((protecao) =>
+          (protecao.getDescription() || "").indexOf(
+            `${PREFIXO_PROTECAO_DIVERGENCIA}:${aba.getSheetId()}:`
+          ) === 0
+        )
+        .map((protecao) => protecao.getRange().getRow())
+    );
+    linhas.forEach((linha) => desbloquearCamposResultado_(aba, linha));
+    for (let linha = LINHA_CABECALHO + 1; linha <= aba.getLastRow(); linha += 1) {
+      if (!linhas.has(linha)) {
+        limparValidacoesBloqueioLinha_(aba, linha);
+      }
+    }
+  });
+  planilha.toast("Bloqueios antigos do CRM removidos.", "CRM", 5);
 }
 
 
@@ -369,39 +369,12 @@ function obterProtecoesDivergenciaLinha_(aba, linha) {
       const descricao = protecao.getDescription() || "";
       const intervaloProtegido = protecao.getRange();
 
-      return descricao.indexOf(PREFIXO_PROTECAO_DIVERGENCIA) === 0 &&
+      return descricao.indexOf(
+        `${PREFIXO_PROTECAO_DIVERGENCIA}:${aba.getSheetId()}:`
+      ) === 0 &&
         intervaloProtegido.getRow() === linha &&
         intervaloProtegido.getLastRow() === linha;
     });
-}
-
-
-/** Retorna os campos automáticos da linha, mantendo A e C liberadas. */
-function obterIntervalosCamposResultado_(aba, linha) {
-  return [
-    aba.getRange(linha, COLUNA_DATA),
-    aba.getRange(
-      linha,
-      COLUNA_NOME,
-      1,
-      COLUNA_FORMA_INGRESSO - COLUNA_NOME + 1
-    ),
-  ];
-}
-
-
-/** Rejeita entradas manuais, inclusive da conta proprietária da planilha. */
-function aplicarValidacaoBloqueio_(aba, linha) {
-  const regraBloqueio = SpreadsheetApp.newDataValidation()
-    .requireFormulaSatisfied("=FALSE")
-    .setAllowInvalid(false)
-    .setHelpText(
-      "Corrija a divergência entre consultor e proprietário e consulte novamente."
-    )
-    .build();
-
-  obterIntervalosCamposResultado_(aba, linha)
-    .forEach((intervalo) => intervalo.setDataValidation(regraBloqueio));
 }
 
 
